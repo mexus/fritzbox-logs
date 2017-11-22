@@ -3,6 +3,7 @@
 //! Currently only textual logs could be parsed. To fetch the logs one can use a python module
 //! [fritzconnection](https://pypi.python.org/pypi/fritzconnection) from a command line like the
 //! following:
+//! 
 //! ```
 //! % python -c "from fritzconnection import FritzConnection; from getpass import getpass; \
 //!              conn = FritzConnection(password=getpass()); \

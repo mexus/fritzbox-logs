@@ -30,7 +30,7 @@ persistent storage for its logs (*sick*). I never expected anything like that,
 seriously. Second of all, I had to do the analysis by hand (like how often a
 recconection happen). So I realized that I have to make my own way out of the
 XVIII century and created this simple tool. (Un)fortunately I didn't have to
-examine the logs since I've started to work on the tool so its development is
+examine the logs since I've started to work on the tool so it's development is
 not running as fast anymore and I haven't implemented any real analysis so far,
 but I totally realize it is only a matter of time when I need it again, so I'll
 be working on the crate until it provides some basic statistics functions at the
