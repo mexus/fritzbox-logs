@@ -3,7 +3,7 @@
 //! Currently only textual logs could be parsed. To fetch the logs one can use a python module
 //! [fritzconnection](https://pypi.python.org/pypi/fritzconnection) from a command line like the
 //! following:
-//! 
+//!
 //! ```
 //! % python -c "from fritzconnection import FritzConnection; from getpass import getpass; \
 //!              conn = FritzConnection(password=getpass()); \
@@ -74,15 +74,6 @@ pub struct Entry {
     pub details: EntryKind,
 }
 
-/// Reads a single line from a buffer and truncates it.
-fn get_string<B: BufRead>(buf: &mut B) -> io::Result<Option<String>> {
-    let mut line = String::new();
-    match buf.read_line(&mut line)? {
-        0 => Ok(None),
-        _ => Ok(Some(line.trim().to_string())),
-    }
-}
-
 /// Extracts an entry kind (and its details) from a message.
 fn parse_message(msg: &str) -> EntryKind {
     lazy_static! {
@@ -145,13 +136,14 @@ fn parse_message(msg: &str) -> EntryKind {
 }
 
 /// Parses an input stream.
-pub fn parse<B: BufRead>(mut buf: B) -> io::Result<Vec<Entry>> {
+pub fn parse<B: BufRead>(buf: B) -> io::Result<Vec<Entry>> {
     lazy_static! {
         static ref LINE: Regex =
             Regex::new("(\\d{2}\\.\\d{2}\\.\\d{2}) (\\d{2}:\\d{2}:\\d{2}) (.*)").unwrap();
     }
     let mut r = Vec::new();
-    while let Some(line) = get_string(&mut buf)? {
+    for line in buf.lines() {
+        let line = line?.trim().to_string();
         if line.is_empty() {
             continue;
         }
