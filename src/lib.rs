@@ -4,7 +4,7 @@
 //! [fritzconnection](https://pypi.python.org/pypi/fritzconnection) from a command line like the
 //! following:
 //!
-//! ```
+//! ```sh
 //! % python -c "from fritzconnection import FritzConnection; from getpass import getpass; \
 //!              conn = FritzConnection(password=getpass()); \
 //!              logs = conn.call_action('DeviceInfo:1', 'GetDeviceLog'); \
@@ -17,33 +17,109 @@ extern crate lazy_static;
 extern crate regex;
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate quick_error;
+#[macro_use]
+extern crate log;
 
-use std::io::{self, BufRead};
+pub mod error;
+
+use std::io::BufRead;
 use chrono::{DateTime, Local, TimeZone};
 use regex::Regex;
+use error::Error;
 
 /// Bandwitdh information.
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
-pub struct DslBandwidth {
+pub struct DslReadyDetails {
     /// Download bandwidth, kbit/s.
     pub download: u64,
     /// Upload bandwidth, kbit/s.
     pub upload: u64,
 }
 
+impl DslReadyDetails {
+    /// Tries to parse a message as if it is a message about the dsl connection was
+    /// established. If it is something else `None` is returned.
+    fn parse_message(msg: &str) -> Result<Option<DslReadyDetails>, Error> {
+        lazy_static! {
+            static ref READY: Regex = Regex::new("DSL ist verfügbar \\(DSL-Synchronisierung \
+                besteht mit (\\d+)/(\\d+) kbit/s\\).").unwrap();
+        }
+        let matches = match READY.captures(msg) {
+            None => return Ok(None),
+            Some(x) => x,
+        };
+        let down: u64 = matches
+            .get(1)
+            .ok_or(Error::RegexInternal("ready message: dl".into()))?
+            .as_str()
+            .parse()?;
+        let up: u64 = matches
+            .get(2)
+            .ok_or(Error::RegexInternal("ready message: up".into()))?
+            .as_str()
+            .parse()?;
+        return Ok(Some(DslReadyDetails {
+            download: down,
+            upload: up,
+        }));
+    }
+}
+
 /// Details about the internet connection.
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
-pub struct InternetDetails {
+pub struct InternetEstablishedDetails {
     /// Ip address.
     pub ip: String,
     /// DNS (usually two of them).
     pub dns: Vec<String>,
     /// Gateway.
     pub gateway: String,
+}
+
+impl InternetEstablishedDetails {
+    /// Tries to parse a message as if it is a message about the internet connection was
+    /// established. If it is something else `None` is returned.
+    fn parse_message(msg: &str) -> Result<Option<Self>, Error> {
+        lazy_static! {
+            static ref INTERNET_OK: Regex = Regex::new("Internetverbindung wurde erfolgreich \
+                hergestellt\\. IP-Adresse: ([0-9a-fA-F\\.:]+), DNS-Server: ([0-9a-fA-F\\.:]+) und \
+                ([0-9a-fA-F\\.:]+), Gateway: ([0-9a-fA-F\\.:]+)").unwrap();
+        }
+        let matches = match INTERNET_OK.captures(msg) {
+            None => return Ok(None),
+            Some(x) => x,
+        };
+        return Ok(Some(InternetEstablishedDetails {
+            ip: matches
+                .get(1)
+                .ok_or(Error::RegexInternal("internet-ok message: ip".into()))?
+                .as_str()
+                .into(),
+            dns: vec![
+                matches
+                    .get(2)
+                    .ok_or(Error::RegexInternal("internet-ok message: dns-1".into()))?
+                    .as_str()
+                    .into(),
+                matches
+                    .get(3)
+                    .ok_or(Error::RegexInternal("internet-ok message: dns-2".into()))?
+                    .as_str()
+                    .into(),
+            ],
+            gateway: matches
+                .get(4)
+                .ok_or(Error::RegexInternal("internet-ok message: gateway".into()))?
+                .as_str()
+                .into(),
+        }));
+    }
 }
 
 /// Kind of a log entry.
@@ -54,9 +130,9 @@ pub enum EntryKind {
     /// German: 'DSL antwortet nicht'.
     DslNoAnswer,
     /// German: 'DSL ist verfügbar'.
-    DslReady(DslBandwidth),
+    DslReady(DslReadyDetails),
     /// German: 'Internetverbindung wurde erfolgreich hergestellt'.
-    InternetEstablished(InternetDetails),
+    InternetEstablished(InternetEstablishedDetails),
     /// An entry we don't care about.
     Unknown,
 }
@@ -75,68 +151,28 @@ pub struct Entry {
 }
 
 /// Extracts an entry kind (and its details) from a message.
-fn parse_message(msg: &str) -> EntryKind {
+fn parse_message(msg: &str) -> Result<EntryKind, Error> {
     lazy_static! {
         static ref NO_ANSWER: Regex = Regex::new("DSL antwortet nicht \\(Keine \
             DSL-Synchronisierung\\)\\.").unwrap();
-        static ref READY: Regex = Regex::new("DSL ist verfügbar \\(DSL-Synchronisierung besteht \
-            mit (\\d+)/(\\d+) kbit/s\\).").unwrap();
-        static ref INTERNET_OK: Regex = Regex::new("Internetverbindung wurde erfolgreich \
-            hergestellt\\. IP-Adresse: ([0-9a-fA-F\\.:]+), DNS-Server: ([0-9a-fA-F\\.:]+) und \
-            ([0-9a-fA-F\\.:]+), Gateway: ([0-9a-fA-F\\.:]+)").unwrap();
     }
-    if NO_ANSWER.is_match(msg) {
-        return EntryKind::DslNoAnswer;
-    }
-    if let Some(matches) = READY.captures(msg) {
-        let down: u64 = matches
-            .get(1)
-            .expect("Internal regex error (dl)")
-            .as_str()
-            .parse()
-            .expect("Not a number");
-        let up: u64 = matches
-            .get(2)
-            .expect("Internal regex error (up)")
-            .as_str()
-            .parse()
-            .expect("Not a number");
-        return EntryKind::DslReady(DslBandwidth {
-            download: down,
-            upload: up,
-        });
-    }
-    if let Some(matches) = INTERNET_OK.captures(msg) {
-        return EntryKind::InternetEstablished(InternetDetails {
-            ip: matches
-                .get(1)
-                .expect("Internal regex error (ip)")
-                .as_str()
-                .into(),
-            dns: vec![
-                matches
-                    .get(2)
-                    .expect("Internal regex error (dns-1)")
-                    .as_str()
-                    .into(),
-                matches
-                    .get(3)
-                    .expect("Internal regex error (dns-2)")
-                    .as_str()
-                    .into(),
-            ],
-            gateway: matches
-                .get(4)
-                .expect("Internal regex error (gateway)")
-                .as_str()
-                .into(),
-        });
-    }
-    EntryKind::Unknown
+    Ok(if NO_ANSWER.is_match(msg) {
+        EntryKind::DslNoAnswer
+    } else if let Some(details) = DslReadyDetails::parse_message(msg)? {
+        EntryKind::DslReady(details)
+    } else if let Some(details) = InternetEstablishedDetails::parse_message(msg)? {
+        EntryKind::InternetEstablished(details)
+    } else {
+        info!["Unknown message: {}", msg];
+        EntryKind::Unknown
+    })
 }
 
 /// Parses an input stream.
-pub fn parse<B: BufRead>(buf: B) -> io::Result<Vec<Entry>> {
+/// It is assumed that entries are given in a local time zone. If a line doesn't follow a format of
+/// `[date] [time] message` (where `date` is `dd.mm.yy` and `time` is `hh:mm:ss`) an error is
+/// returned. Unknown messages are also added to the result (although an info log is printed).
+pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
     lazy_static! {
         static ref LINE: Regex =
             Regex::new("(\\d{2}\\.\\d{2}\\.\\d{2}) (\\d{2}:\\d{2}:\\d{2}) (.*)").unwrap();
@@ -147,29 +183,28 @@ pub fn parse<B: BufRead>(buf: B) -> io::Result<Vec<Entry>> {
         if line.is_empty() {
             continue;
         }
-        let captures = match LINE.captures(&line) {
-            None => panic!["Unformatted line: {}", line],
-            Some(x) => x,
-        };
+        let captures = LINE.captures(&line).ok_or(Error::RegexFormat(
+            line.clone(),
+            "log line parsing".into(),
+        ))?;
         let date_time_str = format!(
             "{} {}",
             captures
                 .get(1)
-                .expect("Internal regex error (date)")
+                .ok_or(Error::RegexInternal("log entry line: date".into()))?
                 .as_str(),
             captures
                 .get(2)
-                .expect("Internal regex error (time)")
+                .ok_or(Error::RegexInternal("log entry line: time".into()))?
                 .as_str()
         );
-        let date_time: DateTime<Local> = Local
-            .datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")
-            .unwrap();
+        let date_time: DateTime<Local> =
+            Local.datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")?;
         let message = captures
             .get(3)
-            .expect("Internal regex error (message)")
+            .ok_or(Error::RegexInternal("log entry line: message".into()))?
             .as_str();
-        let entry_kind = parse_message(message);
+        let entry_kind = parse_message(message)?;
         r.push(Entry {
             timestamp: date_time.timestamp(),
             message: message.to_string(),
@@ -184,14 +219,14 @@ mod tests {
     #[test]
     fn message_parsing() {
         assert_eq!(
-            ::parse_message("DSL antwortet nicht (Keine DSL-Synchronisierung)."),
+            ::parse_message("DSL antwortet nicht (Keine DSL-Synchronisierung).").unwrap(),
             ::EntryKind::DslNoAnswer
         );
         assert_eq!(
             ::parse_message(
                 "DSL ist verfügbar (DSL-Synchronisierung besteht mit 23519/9936 kbit/s).",
-            ),
-            ::EntryKind::DslReady(::DslBandwidth {
+            ).unwrap(),
+            ::EntryKind::DslReady(::DslReadyDetails {
                 download: 23519u64,
                 upload: 9936u64,
             })
@@ -201,8 +236,8 @@ mod tests {
                 "Internetverbindung wurde erfolgreich hergestellt. IP-Adresse: 89.13.155.243, \
                 DNS-Server: 62.109.121.2 und 62.109.121.1, Gateway: 62.52.200.220, Breitband-PoP: \
                 BOBJ02",
-            ),
-            ::EntryKind::InternetEstablished(::InternetDetails {
+            ).unwrap(),
+            ::EntryKind::InternetEstablished(::InternetEstablishedDetails {
                 ip: "89.13.155.243".into(),
                 dns: vec!["62.109.121.2".into(), "62.109.121.1".into()],
                 gateway: "62.52.200.220".into(),
@@ -238,8 +273,8 @@ mod tests {
     #[test]
     fn normal_flow() {
         let input = "\
-17.11.17 16:41:44 Internetverbindung wurde erfolgreich hergestellt. IP-Adresse: 89.13.155.243, DNS-Server: \
-    62.109.121.2 und 62.109.121.1, Gateway: 62.52.200.220, Breitband-PoP: BOBJ02
+17.11.17 16:41:44 Internetverbindung wurde erfolgreich hergestellt. IP-Adresse: 89.13.155.243, \
+    DNS-Server: 62.109.121.2 und 62.109.121.1, Gateway: 62.52.200.220, Breitband-PoP: BOBJ02
 17.11.17 16:41:16 PPPoE-Fehler: Zeitüberschreitung.
 17.11.17 16:40:31 DSL ist verfügbar (DSL-Synchronisierung besteht mit 23519/9936 kbit/s).
 17.11.17 16:38:49 DSL-Synchronisierung beginnt (Training).
@@ -258,7 +293,7 @@ mod tests {
                               89.13.155.243, DNS-Server: 62.109.121.2 und 62.109.121.1, Gateway: \
                               62.52.200.220, Breitband-PoP: BOBJ02"
                         .into(),
-                    details: ::EntryKind::InternetEstablished(::InternetDetails {
+                    details: ::EntryKind::InternetEstablished(::InternetEstablishedDetails {
                         ip: "89.13.155.243".into(),
                         dns: vec!["62.109.121.2".into(), "62.109.121.1".into()],
                         gateway: "62.52.200.220".into(),
@@ -274,7 +309,7 @@ mod tests {
                     message: "DSL ist verfügbar (DSL-Synchronisierung besteht mit 23519/9936 \
                               kbit/s)."
                         .into(),
-                    details: ::EntryKind::DslReady(::DslBandwidth {
+                    details: ::EntryKind::DslReady(::DslReadyDetails {
                         download: 23519,
                         upload: 9936,
                     }),
