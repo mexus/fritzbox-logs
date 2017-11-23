@@ -249,17 +249,13 @@ mod tests {
     fn empty_input() {
         let input = &b""[..];
         let res = ::parse(input);
-        assert!(res.is_ok());
-        let res = res.unwrap();
-        assert!(res.is_empty());
+        assert!(res.unwrap().is_empty());
     }
 
     #[test]
     fn one_message() {
         let input = r#"16.11.17 19:08:11 DSL antwortet nicht (Keine DSL-Synchronisierung)."#;
-        let res = ::parse(input.as_bytes());
-        assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = ::parse(input.as_bytes()).unwrap();
         assert_eq!(res.len(), 1);
         let entry: &::Entry = &res[0];
         assert_eq!(entry.details, ::EntryKind::DslNoAnswer);
@@ -281,9 +277,7 @@ mod tests {
 17.11.17 16:38:40 Internetverbindung wurde getrennt.
 17.11.17 16:38:40 PPPoE-Fehler: Zeitüberschreitung.
 17.11.17 16:38:26 DSL antwortet nicht (Keine DSL-Synchronisierung).";
-        let res = ::parse(input.as_bytes());
-        assert!(res.is_ok());
-        let res = res.unwrap();
+        let res = ::parse(input.as_bytes()).unwrap();
         assert_eq!(
             res,
             vec![
