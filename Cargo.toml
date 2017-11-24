@@ -2,6 +2,15 @@
 name = "fritzbox_logs"
 version = "0.1.0"
 authors = ["mexus <gilaldpellaeon@gmail.com>"]
+description = "A fritz-box logs parsing library"
+license = "LGPL-3.0"
+readme = "README.md"
+keywords = ["fritzbox"]
+repository = "https://github.com/mexus/fritzbox-logs"
+
+[badges]
+travis-ci = { repository = "mexus/fritzbox-logs", branch = "master" }
+maintenance = { status = "experimental" }
 
 [dependencies]
 chrono = "0.4"
