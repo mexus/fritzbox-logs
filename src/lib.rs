@@ -25,7 +25,7 @@ extern crate log;
 pub mod error;
 
 use std::io::BufRead;
-use chrono::{DateTime, Local, TimeZone};
+use chrono::{Local, TimeZone};
 use regex::Regex;
 use error::Error;
 
@@ -198,8 +198,7 @@ pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
                 .ok_or(Error::RegexInternal("log entry line: time".into()))?
                 .as_str()
         );
-        let date_time: DateTime<Local> =
-            Local.datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")?;
+        let date_time = Local.datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")?;
         let message = captures
             .get(3)
             .ok_or(Error::RegexInternal("log entry line: message".into()))?
@@ -257,7 +256,7 @@ mod tests {
         let input = r#"16.11.17 19:08:11 DSL antwortet nicht (Keine DSL-Synchronisierung)."#;
         let res = ::parse(input.as_bytes()).unwrap();
         assert_eq!(res.len(), 1);
-        let entry: &::Entry = &res[0];
+        let entry = &res[0];
         assert_eq!(entry.details, ::EntryKind::DslNoAnswer);
         assert_eq!(
             entry.message,
