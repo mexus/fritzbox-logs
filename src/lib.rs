@@ -215,6 +215,14 @@ pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
 
 #[cfg(test)]
 mod tests {
+    fn local_timestamp_from_text(date: &str) -> i64 {
+        use chrono::{Local, TimeZone};
+        Local
+            .datetime_from_str(date, "%d.%m.%y %H:%M:%S")
+            .unwrap()
+            .timestamp()
+    }
+
     #[test]
     fn message_parsing() {
         assert_eq!(
@@ -262,7 +270,10 @@ mod tests {
             entry.message,
             "DSL antwortet nicht (Keine DSL-Synchronisierung).".to_string()
         );
-        assert_eq!(entry.timestamp, 1510855691i64);
+        assert_eq!(
+            entry.timestamp,
+            local_timestamp_from_text("16.11.17 19:08:11")
+        );
     }
 
     #[test]
@@ -281,7 +292,7 @@ mod tests {
             res,
             vec![
                 ::Entry {
-                    timestamp: 1510933304,
+                    timestamp: local_timestamp_from_text("17.11.17 16:41:44"),
                     message: "Internetverbindung wurde erfolgreich hergestellt. IP-Adresse: \
                               89.13.155.243, DNS-Server: 62.109.121.2 und 62.109.121.1, Gateway: \
                               62.52.200.220, Breitband-PoP: BOBJ02"
@@ -293,12 +304,12 @@ mod tests {
                     }),
                 },
                 ::Entry {
-                    timestamp: 1510933276,
+                    timestamp: local_timestamp_from_text("17.11.17 16:41:16"),
                     message: "PPPoE-Fehler: Zeitüberschreitung.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: 1510933231,
+                    timestamp: local_timestamp_from_text("17.11.17 16:40:31"),
                     message: "DSL ist verfügbar (DSL-Synchronisierung besteht mit 23519/9936 \
                               kbit/s)."
                         .into(),
@@ -308,22 +319,22 @@ mod tests {
                     }),
                 },
                 ::Entry {
-                    timestamp: 1510933129,
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:49"),
                     message: "DSL-Synchronisierung beginnt (Training).".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: 1510933120,
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:40"),
                     message: "Internetverbindung wurde getrennt.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: 1510933120,
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:40"),
                     message: "PPPoE-Fehler: Zeitüberschreitung.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: 1510933106,
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:26"),
                     message: "DSL antwortet nicht (Keine DSL-Synchronisierung).".into(),
                     details: ::EntryKind::DslNoAnswer,
                 },
