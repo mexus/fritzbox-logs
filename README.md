@@ -1,5 +1,7 @@
 [![Build Status](https://travis-ci.org/mexus/fritzbox-logs.svg?branch=master)](https://travis-ci.org/mexus/fritzbox-logs)
 
+[[Documentation]](https://docs.rs/fritzbox_logs/)
+
 # Fritz!box logs
 
 A library that aims to parse logs from a Fritz!Box routers.
