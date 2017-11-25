@@ -25,7 +25,7 @@ extern crate log;
 pub mod error;
 
 use std::io::BufRead;
-use chrono::{Local, TimeZone};
+use chrono::{TimeZone, Utc};
 use regex::Regex;
 use error::Error;
 
@@ -142,7 +142,7 @@ pub enum EntryKind {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub struct Entry {
-    /// Entry timestamp (unix epoch).
+    /// Entry timestamp (unix epoch, UTC).
     pub timestamp: i64,
     /// Original message.
     pub message: String,
@@ -169,10 +169,11 @@ fn parse_message(msg: &str) -> Result<EntryKind, Error> {
 }
 
 /// Parses an input stream.
-/// It is assumed that entries are given in a local time zone. If a line doesn't follow a format of
-/// `[date] [time] message` (where `date` is `dd.mm.yy` and `time` is `hh:mm:ss`) an error is
-/// returned. Unknown messages are also added to the result (although an info log is printed).
-pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
+/// Logs are expected to be lines in the form of `[date] [time] [message]` (where `date` is
+/// `dd.mm.yy` and `time` is `hh:mm:ss`). If a line doesn't follow the format an error is returned.
+/// Timezone should be adjusted by a `tz` parameter.  Unknown messages are also added to the result
+/// (although an info log is printed).
+pub fn parse<B: BufRead, Tz: TimeZone>(buf: B, tz: Tz) -> Result<Vec<Entry>, Error> {
     lazy_static! {
         static ref LINE: Regex =
             Regex::new("(\\d{2}\\.\\d{2}\\.\\d{2}) (\\d{2}:\\d{2}:\\d{2}) (.*)").unwrap();
@@ -198,14 +199,14 @@ pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
                 .ok_or(Error::RegexInternal("log entry line: time".into()))?
                 .as_str()
         );
-        let date_time = Local.datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")?;
+        let date_time = tz.datetime_from_str(&date_time_str, "%d.%m.%y %H:%M:%S")?;
         let message = captures
             .get(3)
             .ok_or(Error::RegexInternal("log entry line: message".into()))?
             .as_str();
         let entry_kind = parse_message(message)?;
         r.push(Entry {
-            timestamp: date_time.timestamp(),
+            timestamp: date_time.with_timezone(&Utc).timestamp(),
             message: message.to_string(),
             details: entry_kind,
         });
@@ -215,10 +216,10 @@ pub fn parse<B: BufRead>(buf: B) -> Result<Vec<Entry>, Error> {
 
 #[cfg(test)]
 mod tests {
-    fn local_timestamp_from_text(date: &str) -> i64 {
-        use chrono::{Local, TimeZone};
-        Local
-            .datetime_from_str(date, "%d.%m.%y %H:%M:%S")
+    use chrono::{Local, TimeZone};
+
+    fn local_timestamp_from_text<Tz: TimeZone>(date: &str, tz: Tz) -> i64 {
+        tz.datetime_from_str(date, "%d.%m.%y %H:%M:%S")
             .unwrap()
             .timestamp()
     }
@@ -255,14 +256,14 @@ mod tests {
     #[test]
     fn empty_input() {
         let input = &b""[..];
-        let res = ::parse(input);
+        let res = ::parse(input, Local);
         assert!(res.unwrap().is_empty());
     }
 
     #[test]
     fn one_message() {
         let input = r#"16.11.17 19:08:11 DSL antwortet nicht (Keine DSL-Synchronisierung)."#;
-        let res = ::parse(input.as_bytes()).unwrap();
+        let res = ::parse(input.as_bytes(), Local).unwrap();
         assert_eq!(res.len(), 1);
         let entry = &res[0];
         assert_eq!(entry.details, ::EntryKind::DslNoAnswer);
@@ -272,7 +273,25 @@ mod tests {
         );
         assert_eq!(
             entry.timestamp,
-            local_timestamp_from_text("16.11.17 19:08:11")
+            local_timestamp_from_text("16.11.17 19:08:11", Local)
+        );
+    }
+
+    #[test]
+    fn one_message_utc() {
+        use chrono::Utc;
+        let input = r#"16.11.17 19:08:11 DSL antwortet nicht (Keine DSL-Synchronisierung)."#;
+        let res = ::parse(input.as_bytes(), Utc).unwrap();
+        assert_eq!(res.len(), 1);
+        let entry = &res[0];
+        assert_eq!(entry.details, ::EntryKind::DslNoAnswer);
+        assert_eq!(
+            entry.message,
+            "DSL antwortet nicht (Keine DSL-Synchronisierung).".to_string()
+        );
+        assert_eq!(
+            entry.timestamp,
+            local_timestamp_from_text("16.11.17 19:08:11", Utc)
         );
     }
 
@@ -287,12 +306,12 @@ mod tests {
 17.11.17 16:38:40 Internetverbindung wurde getrennt.
 17.11.17 16:38:40 PPPoE-Fehler: Zeitüberschreitung.
 17.11.17 16:38:26 DSL antwortet nicht (Keine DSL-Synchronisierung).";
-        let res = ::parse(input.as_bytes()).unwrap();
+        let res = ::parse(input.as_bytes(), Local).unwrap();
         assert_eq!(
             res,
             vec![
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:41:44"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:41:44", Local),
                     message: "Internetverbindung wurde erfolgreich hergestellt. IP-Adresse: \
                               89.13.155.243, DNS-Server: 62.109.121.2 und 62.109.121.1, Gateway: \
                               62.52.200.220, Breitband-PoP: BOBJ02"
@@ -304,12 +323,12 @@ mod tests {
                     }),
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:41:16"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:41:16", Local),
                     message: "PPPoE-Fehler: Zeitüberschreitung.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:40:31"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:40:31", Local),
                     message: "DSL ist verfügbar (DSL-Synchronisierung besteht mit 23519/9936 \
                               kbit/s)."
                         .into(),
@@ -319,22 +338,22 @@ mod tests {
                     }),
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:38:49"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:49", Local),
                     message: "DSL-Synchronisierung beginnt (Training).".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:38:40"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:40", Local),
                     message: "Internetverbindung wurde getrennt.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:38:40"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:40", Local),
                     message: "PPPoE-Fehler: Zeitüberschreitung.".into(),
                     details: ::EntryKind::Unknown,
                 },
                 ::Entry {
-                    timestamp: local_timestamp_from_text("17.11.17 16:38:26"),
+                    timestamp: local_timestamp_from_text("17.11.17 16:38:26", Local),
                     message: "DSL antwortet nicht (Keine DSL-Synchronisierung).".into(),
                     details: ::EntryKind::DslNoAnswer,
                 },
